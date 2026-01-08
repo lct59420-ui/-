@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>期末考監考看板</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<style>
+body {
+  font-family: "Microsoft JhengHei", sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+.track-transition {
+  transition: stroke-dashoffset 1s linear, stroke 0.4s ease;
+}
+</style>
+</head>
+
+<body oncontextmenu="return false;">
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo, useRef } = React;
+
+/* ===== 考程 ===== */
+const SCHEDULE = [
+  { type:"exam",  start:"08:45", end:"09:25", subject:"社會" },
+  { type:"break", start:"09:25", end:"09:35" },
+  { type:"exam",  start:"09:35", end:"10:30", subject:"數學" }
+];
+
+/* ===== 工具 ===== */
+const nowMs = d => d.getHours()*3600000 + d.getMinutes()*60000 + d.getSeconds()*1000;
+const fmtClock = d => `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`;
+const fmtRemain = ms => {
+  if (ms<=0) return "00:00";
+  const m = Math.floor(ms/60000);
+  const s = Math.floor((ms%60000)/1000);
+  return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+};
+
+/* ===== Beep ===== */
+const beep = (count=1)=>{
+  const ctx = new (window.AudioContext||window.webkitAudioContext)();
+  for(let i=0;i<count;i++){
+    const o=ctx.createOscillator();
+    o.frequency.value=800;
+    o.connect(ctx.destination);
+    o.start(ctx.currentTime+i*0.3);
+    o.stop(ctx.currentTime+i*0.3+0.15);
+  }
+};
+
+const App = () => {
+  const [now,setNow]=useState(new Date());
+  const firedRef = useRef({});
+
+  useEffect(()=>{
+    const t=setInterval(()=>setNow(new Date()),1000);
+    return()=>clearInterval(t);
+  },[]);
+
+  const slot = useMemo(()=>{
+    const ms=nowMs(now);
+    for(const s of SCHEDULE){
+      const [sh,sm]=s.start.split(":").map(Number);
+      const [eh,em]=s.end.split(":").map(Number);
+      const st=sh*3600000+sm*60000;
+      const ed=eh*3600000+em*60000;
+      if(ms>=st && ms<ed) return {...s,startMs:st,endMs:ed,dur:ed-st};
+    }
+    return null;
+  },[now]);
+
+  const info = useMemo(()=>{
+    if(!slot) return {remain:"--:--",pct:0,color:"stroke-gray-300",text:"等待中"};
+    const r=slot.endMs-nowMs(now);
+    const pct=Math.max(0,(r/slot.dur)*100);
+    let color="stroke-green-500";
+    let text=slot.type==="exam"?"考試中":"下課";
+    if(slot.type==="exam" && r<=600000) color="stroke-red-500";
+    return {remain:fmtRemain(r),pct,color,text,remainMs:r};
+  },[now,slot]);
+
+  /* ===== 自動提示 ===== */
+  useEffect(()=>{
+    if(!slot) return;
+    const key=slot.start;
+    if(!firedRef.current[key]){
+      beep(1);
+      firedRef.current[key]={start:true,ten:false};
+    }
+    if(slot.type==="exam" && info.remainMs<=600000 && !firedRef.current[key].ten){
+      beep(2);
+      firedRef.current[key].ten=true;
+    }
+  },[slot,info]);
+
+  /* ===== 全螢幕 ===== */
+  const fullscreen=()=>{
+    if(!document.fullscreenElement){
+      document.documentElement.requestFullscreen();
+    }else{
+      document.exitFullscreen();
+    }
+  };
+
+  return(
+  <div className="h-screen flex flex-col bg-gray-100">
+
+    <button onClick={fullscreen}
+      className="fixed top-4 right-4 z-50 bg-black text-white px-4 py-2 rounded shadow">
+      監考模式
+    </button>
+
+    {/* 上 */}
+    <div className="h-[33vh] flex bg-white border-b-4">
+      <div className="w-1/3 flex flex-col justify-center items-center bg-gray-50">
+        <div className="text-xl text-gray-500">現在時間</div>
+        <div className="text-[6vw] font-black">{fmtClock(now)}</div>
+      </div>
+
+      <div className="w-2/3 relative flex items-center justify-center bg-gray-100">
+        <div className="absolute text-center">
+          <div className="text-[3vw] font-bold">{info.text}</div>
+          <div className="text-[4.5vw] font-black">{info.remain}</div>
+        </div>
+
+        <svg viewBox="0 0 300 50" className="w-full h-full">
+          <rect x="5" y="5" width="290" height="40" rx="20"
+            fill="none" stroke="#e5e7eb" strokeWidth="8"/>
+          <rect x="5" y="5" width="290" height="40" rx="20"
+            fill="none"
+            className={`track-transition ${info.color}`}
+            strokeWidth="8"
+            pathLength="100"
+            strokeDasharray="100"
+            strokeDashoffset={100-info.pct}/>
+        </svg>
+      </div>
+    </div>
+
+    {/* 下 */}
+    <div className="flex flex-1">
+      <div className="w-1/2 bg-white border-r-4">
+        {SCHEDULE.filter(s=>s.type==="exam").map((s,i)=>(
+          <div key={i}
+            className={`flex items-center px-8 h-1/2 border-b
+            ${slot?.start===s.start?"bg-yellow-300":""}`}>
+            <div className="flex-1 text-[3vw] font-black">{s.subject}</div>
+            <div className="text-[2.5vw] font-bold">{s.start}～{s.end}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="w-1/2 flex items-center justify-center bg-[#fffdf0]">
+        <div className="text-[5vw] font-bold text-center">
+          請保持安靜，專心作答
+        </div>
+      </div>
+    </div>
+  </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
